@@ -69,10 +69,13 @@ public class ReservationService {
         // 3) make sure the quota row exists, OUTSIDE the transaction on purpose.
         // Inside it, INSERT IGNORE takes a shared lock on an existing row, and two parallel requests
         // from the same user would then both try to upgrade to an exclusive lock and deadlock.
-        repo.ensureQuotaRow(showId, userId);
+
 
         for (int attempt = 1; ; attempt++) {
             try {
+                // inside the retry loop on purpose: concurrent upserts of the same quota row can
+                // deadlock in InnoDB, and a deadlock victim is safe to simply retry
+                repo.ensureQuotaRow(showId, userId);
                 Outcome out = tx.execute(status -> doReserve(userId, showId, seats, idemKey, hash, amount, show.perUserLimit()));
                 // committed by now, so the counters match what is really in the database
                 if (out.replay()) countDeclined("idempotent-replay");
@@ -105,7 +108,7 @@ public class ReservationService {
                     .orElseThrow(() -> new ApiException(409, "idempotency-conflict", "Key is being processed, retry"));
             if (!prev.requestHash().equals(hash))
                 throw new ApiException(409, "idempotency-mismatch", "Idempotency key was used with a different request");
-            ReservationResponse original = repo.findReservation(prev.reservationID())
+            ReservationResponse original = repo.findReservation(prev.reservationId())
                     .orElseThrow(() -> new ApiException(409, "idempotency-conflict", "Original reservation not found"));
             return new Outcome(original, true);   // nothing new is written
         }
