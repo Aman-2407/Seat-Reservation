@@ -23,7 +23,7 @@ public class ReservationRepository {
     //Callinf before the transcation starts (autocomit), see the service for why
 
     public  void ensureQuotaRow(long showId, String userID){
-        jdbcTemplate.update("INSERT INTO user_show_quota (show_id, user_id, held) VALUES (?,?,0 )", showId, userID);
+        jdbcTemplate.update("INSERT INTO user_show_quota (show_id, user_id, held) VALUES (?,?,0 )"+"ON DUPLICATE KEY UPDATE held=held", showId, userID);
     }
 // Idempotency: the primary key (user_id, idem_key) is the lock. If two identical requests
 // arrive together, the second INSERT waits for the first to commit or roll back, and then
@@ -73,6 +73,33 @@ public class ReservationRepository {
                 (rs, i) -> new ReservationResponse(rs.getString(1), rs.getLong(2), rs.getString(3),
                         Arrays.asList(rs.getString(4).split(",")), rs.getLong(5), rs.getString(6)),
                 id).stream().findFirst();
+    }
+    // FOR UPDATE: two cancels of the same reservation (a double click, a retry) line up here,
+// so the second one sees the status the first one left behind.
+    public Optional<ReservationResponse> findReservationForUpdate(String id) {
+        return jdbcTemplate.query("SELECT id, show_id, user_id, seats, amount_paise, status "
+                        + "FROM reservations WHERE id = ? FOR UPDATE",
+                (rs, i) -> new ReservationResponse(rs.getString(1), rs.getLong(2), rs.getString(3),
+                        Arrays.asList(rs.getString(4).split(",")), rs.getLong(5), rs.getString(6)),
+                id).stream().findFirst();
+    }
+    // Mirror of tryReserveQuota. "held >= ?" stops the counter from ever going negative.
+    public boolean releaseQuota(long showId, String userId, int n) {
+        return jdbcTemplate.update("UPDATE user_show_quota SET held = held - ? "
+                        + "WHERE show_id = ? AND user_id = ? AND held >= ?",
+                n, showId, userId, n) == 1;
+    }
+
+    // The guard on reservation_id + status is what makes a cancel unable to resurrect or steal a seat:
+// it only touches a seat that is still confirmed FOR THIS reservation.
+    public boolean releaseSeat(long showId, String seat, String reservationId) {
+        return jdbcTemplate.update("UPDATE seats SET status = 'available', user_id = NULL, reservation_id = NULL "
+                        + "WHERE show_id = ? AND seat_no = ? AND reservation_id = ? AND status = 'confirmed'",
+                showId, seat, reservationId) == 1;
+    }
+
+    public void markCancelled(String id) {
+        jdbcTemplate.update("UPDATE reservations SET status = 'cancelled' WHERE id = ? AND status = 'confirmed'", id);
     }
 }
 

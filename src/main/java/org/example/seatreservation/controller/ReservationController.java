@@ -36,4 +36,10 @@ public class ReservationController {
         // 201 for a fresh booking, 200 when this was a retry returning the original reservation
         return ResponseEntity.status(out.replay() ? HttpStatus.OK : HttpStatus.CREATED).body(out.reservationResponse());
     }
+    // Owner check happens in the service, using the token's user id.
+    @PostMapping("/reservations/{id}/cancel")
+    public ReservationResponse cancel(@PathVariable("id") String reservationId, HttpServletRequest req) {
+        String userId = (String) req.getAttribute("userId");
+        return service.cancel(userId, reservationId);
+    }
 }

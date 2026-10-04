@@ -147,4 +147,50 @@ public class ReservationService {
             throw new IllegalStateException(e);   // SHA-256 is guaranteed to exist on every JVM
         }
     }
+
+    // Same shape as reserve(): transaction template, retry on deadlock, metrics only after commit.
+    public ReservationResponse cancel(String userId, String reservationId) {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                Outcome out = tx.execute(status -> doCancel(userId, reservationId));
+                if (!out.replay()) metrics.counter("reservations.cancelled").increment();
+                return out.reservationResponse();
+            } catch (PessimisticLockingFailureException e) {
+                if (attempt >= MAX_ATTEMPTS)
+                    throw new ApiException(429, "busy", "Too much contention, please retry");
+                pause(attempt);
+            }
+        }
+    }
+
+    // "replay = true" here just means "was already cancelled, nothing changed".
+    private Outcome doCancel(String userId, String reservationId) {
+        ReservationResponse r = repo.findReservationForUpdate(reservationId)
+                .orElseThrow(() -> new ApiException(404, "not_found", "Reservation not found"));
+
+        // owner check uses the token's user only, a body or header can't change who we are
+        if (!r.userId().equals(userId))
+            throw new ApiException(403, "forbidden", "You can only cancel your own reservations");
+
+        if ("cancelled".equals(r.status()))
+            return new Outcome(r, true);   // already done, retrying a cancel is harmless
+
+        // same lock order as reserve: quota row first, then seats in sorted order
+        List<String> seats = new ArrayList<>(r.seats());
+        Collections.sort(seats);
+
+        // If either of these fails, the data disagrees with the reservation, which should be
+        // impossible. IllegalStateException rolls everything back and shows up as a logged 500,
+        // which is what I want: a loud signal rather than a silently wrong count.
+        if (!repo.releaseQuota(r.showId(), userId, seats.size()))
+            throw new IllegalStateException("Quota out of sync for reservation " + reservationId);
+        for (String seat : seats) {
+            if (!repo.releaseSeat(r.showId(), seat, reservationId))
+                throw new IllegalStateException("Seat " + seat + " not held by reservation " + reservationId);
+        }
+        repo.markCancelled(reservationId);
+
+        return new Outcome(new ReservationResponse(r.reservationId(), r.showId(), r.userId(),
+                seats, r.amountPaise(), "cancelled"), false);
+    }
 }
