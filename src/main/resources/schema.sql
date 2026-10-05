@@ -24,12 +24,13 @@ CREATE TABLE IF NOT EXISTS reservations (
 );
 
 CREATE TABLE IF NOT EXISTS idempotency_keys (
-                                  user_id VARCHAR(64) NOT NULL,
-                                  idem_key VARCHAR(128) NOT NULL,
-                                  request_hash CHAR(64) NOT NULL,
-                                  reservation_id VARCHAR(64) NOT NULL,
-                                  PRIMARY KEY (user_id, idem_key)
-);
+                                                user_id VARCHAR(64) NOT NULL,
+    show_id BIGINT NOT NULL,
+    idem_key VARCHAR(128) NOT NULL,
+    request_hash CHAR(64) NOT NULL,
+    reservation_id VARCHAR(64) NOT NULL,
+    PRIMARY KEY (user_id, show_id, idem_key)
+    );
 
 CREATE TABLE IF NOT EXISTS user_show_quota (
                                  show_id BIGINT NOT NULL,

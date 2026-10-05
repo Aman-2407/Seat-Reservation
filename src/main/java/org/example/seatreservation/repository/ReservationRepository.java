@@ -38,29 +38,30 @@ public class ReservationRepository {
     // Idempotency: the primary key (user_id, idem_key) is the lock. If two identical requests
     // arrive together, the second INSERT waits for the first to commit or roll back, and then
     // either fails with a duplicate (first one won) or goes through (first one was declined).
-    public boolean insertIdempotencyKey(String userId, String key, String hash, String reservationId) {
+    // The key is scoped to (user, show, key). Same key on the SAME show with different seats is
+// still a mismatch (409), but the same key reused on a different show is just a new request.
+    public boolean insertIdempotencyKey(String userId, long showId, String key, String hash, String reservationId) {
         try {
             jdbc.update("""
-                    INSERT INTO idempotency_keys (user_id, idem_key, request_hash, reservation_id)
-                    VALUES (?, ?, ?, ?)
-                    """, userId, key, hash, reservationId);
+                INSERT INTO idempotency_keys (user_id, show_id, idem_key, request_hash, reservation_id)
+                VALUES (?, ?, ?, ?, ?)
+                """, userId, showId, key, hash, reservationId);
             return true;
         } catch (DuplicateKeyException e) {
             return false;
         }
     }
 
-    // FOR SHARE = locking read, so it sees the latest committed row. A plain SELECT could read an
-    // older snapshot (InnoDB's default REPEATABLE READ) and miss the row we just collided with.
-    public Optional<IdemRow> lockIdempotencyKey(String userId, String key) {
+    // FOR SHARE = locking read, so it sees the latest committed row, not an older snapshot.
+    public Optional<IdemRow> lockIdempotencyKey(String userId, long showId, String key) {
         return jdbc.query("""
-                        SELECT request_hash, reservation_id
-                        FROM idempotency_keys
-                        WHERE user_id = ? AND idem_key = ?
-                        FOR SHARE
-                        """,
+                    SELECT request_hash, reservation_id
+                    FROM idempotency_keys
+                    WHERE user_id = ? AND show_id = ? AND idem_key = ?
+                    FOR SHARE
+                    """,
                 (rs, i) -> new IdemRow(rs.getString(1), rs.getString(2)),
-                userId, key).stream().findFirst();
+                userId, showId, key).stream().findFirst();
     }
 
     // Per-user limit as ONE guarded UPDATE: only bumps the counter if the result stays within the limit.

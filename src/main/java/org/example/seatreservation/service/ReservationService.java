@@ -102,9 +102,9 @@ public class ReservationService {
                               String hash, long amount, int limit) {
         String reservationId = UUID.randomUUID().toString();
 
-        if (!repo.insertIdempotencyKey(userId, idemKey, hash, reservationId)) {
-            // key already used by this user: either a legit retry or a different request reusing it
-            ReservationRepository.IdemRow prev = repo.lockIdempotencyKey(userId, idemKey)
+        if (!repo.insertIdempotencyKey(userId, showId, idemKey, hash, reservationId)) {
+            // key already used by this user on this show: either a legit retry or a different request reusing it
+            ReservationRepository.IdemRow prev = repo.lockIdempotencyKey(userId, showId, idemKey)
                     .orElseThrow(() -> new ApiException(409, "idempotency-conflict", "Key is being processed, retry"));
             if (!prev.requestHash().equals(hash))
                 throw new ApiException(409, "idempotency-mismatch", "Idempotency key was used with a different request");
