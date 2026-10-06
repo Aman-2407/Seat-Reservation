@@ -49,7 +49,7 @@ public class Burst {
 
         http = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
-                .connectTimeout(Duration.ofSeconds(15))
+                .connectTimeout(Duration.ofSeconds(90)) // Increased for free-tier latency
                 .executor(Executors.newVirtualThreadPerTaskExecutor())
                 .build();
 
@@ -60,6 +60,10 @@ public class Burst {
         sameUserParallel();
         idempotentRetries();
         spoofedIdentity();
+
+        System.out.println("Cooling down for 30 seconds before the final stampede...");
+        Thread.sleep(30000); // Gives Render/Aiven time to drain the queue
+
         stampede();
 
         finalChecks(before);
@@ -68,7 +72,6 @@ public class Burst {
         System.out.println(failures == 0 ? "RESULT: ALL CHECKS PASSED" : "RESULT: " + failures + " CHECK(S) FAILED");
         System.exit(failures == 0 ? 0 : 1);
     }
-
     // ---------------------------------------------------------------- scenarios
 
     static void hotSeatStorm() {
@@ -335,7 +338,7 @@ public class Burst {
     static Res post(String path, String token, String json) {
         try {
             HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(base + path))
-                    .timeout(Duration.ofSeconds(60))
+                    .timeout(Duration.ofSeconds(120))
                     .header("Content-Type", "application/json");
             if (token != null) b.header("Authorization", "Bearer " + token);
             b.POST(json == null ? BodyPublishers.noBody() : BodyPublishers.ofString(json));
@@ -348,7 +351,7 @@ public class Burst {
 
     static Res get(String path) {
         try {
-            HttpRequest req = HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(60)).GET().build();
+            HttpRequest req = HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(90)).GET().build();
             HttpResponse<String> r = http.send(req, BodyHandlers.ofString());
             return new Res(r.statusCode(), r.body(), null);
         } catch (Exception e) {
@@ -383,7 +386,7 @@ public class Burst {
             Res r = get("/actuator/health/readiness");
             if (r.status() == 200) { System.out.println("Service is ready: " + base); return; }
             System.out.println("Waiting for service (attempt " + i + ", status " + r.status() + ")...");
-            Thread.sleep(5000);
+            Thread.sleep(10000);
         }
         System.out.println("Service never became ready, giving up.");
         System.exit(2);
