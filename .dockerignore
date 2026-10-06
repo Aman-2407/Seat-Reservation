@@ -1,0 +1,6 @@
+target/
+.idea/
+.git/
+scripts/
+*.md
+show.json

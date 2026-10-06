@@ -10,4 +10,17 @@ services:
       test: ["CMD","mysqladmin","ping","-h","localhost","-proot"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy   # wait until MySQL answers before starting the app
+    environment:
+     # inside the compose network the DB is reachable as "db" on its real port 3306
+      DB_URL: jdbc:mysql://db:3306/seats
+      DB_USER: root
+      DB_PASSWORD: root
+      ADMIN_TOKEN: admin-secret
+    ports:
+    - "8080:8080"
